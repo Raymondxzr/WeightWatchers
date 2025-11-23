@@ -7,6 +7,35 @@ import numpy as np
 from typing import Optional, Union
 from safetensors import safe_open
 
+def load_cached_completions(cached_file, tokenizer, batch_size=8):
+    """
+    Load precomputed completions and convert them into:
+        batch_input_ids, batch_attention_masks, batch_select_masks
+    exactly matching generate_completions_and_masks output format.
+    """
+    import json
+    import torch
+
+    with open(cached_file, "r") as f:
+        completions = [json.loads(x)["completion"] for x in f]
+
+    outputs, attention_masks, gather_masks = [], [], []
+
+    # convert to batches identical to generate_completions_and_masks
+    for i in range(0, len(completions), batch_size):
+        batch = completions[i:i+batch_size]
+        tokenized = tokenizer(batch, padding="longest", return_tensors="pt")
+
+        outputs.append(tokenized.input_ids)
+        attention_masks.append(tokenized.attention_mask)
+
+        # gather mask = 1 for all generated tokens
+        maxlen = tokenized.input_ids.shape[1]
+        gm = torch.ones(len(batch), maxlen, dtype=torch.long)
+        gather_masks.append(gm)
+
+    return outputs, attention_masks, gather_masks
+
 
 def seed_torch(seed=42):
     random.seed(seed)

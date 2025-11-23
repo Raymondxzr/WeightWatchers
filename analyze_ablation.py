@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
+"""
+Single-GPU neuron ablation evaluator with dynamic patching.
+
+- Assumes change-score results are stored at:
+    Alignment/hooked_llama/neuron_activation/<slug>/<BASE_NAME>/completion.pt
+
+- Writes dynamic patch outputs to:
+    Alignment/hooked_llama/neuron_activation/<slug>/<BASE_NAME>/Dynamic_patching_{FRACTION:.4f}.jsonl
+"""
+
 import os
 import json
+from datetime import datetime
 
 import torch
 import datasets
@@ -11,45 +22,53 @@ from src.eval.utils import load_hooked_lm_and_tokenizer, generate_completions
 from src.eval.templates import create_prompt_with_tulu_chat_format
 from src.neuron_ablation import register_neuron_intervention
 
+# Make allocator a bit more robust to fragmentation
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-# =======================
-# CONFIG / PATHS / FLAGS
-# =======================
+# ==========================================================
+# CONFIG — EDIT THESE AS NEEDED
+# ==========================================================
+DATA_ROOT = "Alignment"
 
-OUT_DIR = "Alignment/ablation_outputs"
+OUT_DIR = os.path.join(DATA_ROOT, "ablation_outputs")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-METHOD = "dynamic_patch"  # or "zero", but this script is focused on dynamic_patch
-
-# IMPORTANT: paper-style direction
-#   - MODEL_PATH      = less-safe / base model   (target, gets patched)
-#   - DONOR_MODEL_PATH = more-safe / aligned model (donor, provides activations)
-MODEL_PATH = "models/Meta-Llama-3-8B-Instruct-TARharden"              # target (base)
+# Target (less-safe / TAR-hardened) and donor (aligned / base) models
+MODEL_PATH = "models/Meta-Llama-3-8B-Instruct-TARharden"
+DONOR_MODEL_PATH = "models/Meta-Llama-3-8B-Instruct"
 TOKENIZER_PATH = "models/Meta-Llama-3-8B-Instruct"
-# DONOR_MODEL_PATH = "models/Meta-Llama-3-8B-Instruct-TARharden"  # donor (aligned)
-DONOR_MODEL_PATH = "models/Meta-Llama-3-8B-Instruct"  # donor (aligned)
-# Single HarmBench change-scores file (base vs TAR-harden)
-MERGED_CS_PATH = (
-    "Alignment/hooked_llama/neuron_activation/"
-    "Meta-Llama-3-8B-Instruct_vs_Meta-Llama-3-8B-Instruct-"
-    "TARharden_on_harmbench_tar_completion.pt"
-)
 
-# HarmBench dataset (already converted to your HumanEval-style JSONL)
-DATASET_PATH = "Alignment/data/eval/harmbench/HarmBench_standard.jsonl"
+# Name of the base model folder inside neuron_activation
+BASE_NAME = "Meta-Llama-3-8B-Instruct"
+
+# Datasets to run over (slug used in paths; pretty is just for logging)
+DATASETS = [
+    {"slug": "harmbench", "pretty": "HarmBench"},
+    {"slug": "wmdp", "pretty": "WMDP"},
+]
 
 # Fractions of top-change neurons to patch
-# FRACTIONS = [0.01, 0.005, 0.001, 0.0005]
-FRACTIONS = [0]
+FRACTIONS = [0.001]     # e.g., [0.0, 0.0005, 0.001]
+NUM_SAMPLES = -1        # -1 = use all examples in filtered file
 MAX_NEW_TOKENS = 128
 BATCH_SIZE = 4
-NUM_SAMPLES = 4   # -1 for all
+
+SEED = 42
+# ==========================================================
 
 
-# =======================================
-# Helper: dynamic patch generation loop
-# =======================================
+# ==========================================================
+# Logging helper
+# ==========================================================
+def log(msg: str) -> None:
+    """Print a message with ISO timestamp."""
+    ts = datetime.now().isoformat(timespec="seconds")
+    print(f"[{ts}] {msg}", flush=True)
 
+
+# ==========================================================
+# Dynamic Patch Generation
+# ==========================================================
 def generate_completions_dynamic_patch(
     donor_model,
     target_model,
@@ -63,38 +82,35 @@ def generate_completions_dynamic_patch(
 ):
     """
     Dynamic activation patching with KV-cache, SafetyNeuron-style.
-
-    donor_model: aligned (safe) model, provides cached activations
-    target_model: less-safe (base) model, gets patched at selected neurons
+    Single process; uses whatever GPUs are visible.
     """
     donor_model.eval()
     target_model.eval()
     device = next(target_model.parameters()).device
     all_outputs = []
 
-    indices = range(0, len(prompts), batch_size)
-    iterator = indices if disable_tqdm else tqdm(indices, desc="Dynamic patching")
-
-    for start in iterator:
+    for start in tqdm(
+        range(0, len(prompts), batch_size),
+        disable=disable_tqdm,
+        desc="Dynamic patching",
+    ):
         batch_prompts = prompts[start:start + batch_size]
         if not batch_prompts:
             break
 
-        # Tokenize batch
-        enc = tokenizer(
+        tok_out = tokenizer(
             batch_prompts,
             return_tensors="pt",
             padding=True,
             truncation=False,
         )
-        input_ids = enc["input_ids"].to(device)          # [B, L]
-        attention_mask = enc["attention_mask"].to(device)
-        prompt_lengths = attention_mask.sum(dim=1)       # per-example prefix length
-
-        batch_bs = input_ids.size(0)
+        input_ids = tok_out["input_ids"].to(device)
+        attention_mask = tok_out["attention_mask"].to(device)
+        prompt_lengths = attention_mask.sum(dim=1)
+        B = input_ids.size(0)
         eos_token_id = tokenizer.eos_token_id
 
-        # ---- 1) Initial full-prompt forward to set up caches ----
+        # 1) Initial full-prompt forward (set up caches)
         patcher.reset()
         with torch.no_grad():
             donor_out = donor_model(
@@ -111,54 +127,53 @@ def generate_completions_dynamic_patch(
                 use_cache=True,
             )
         target_past = target_out.past_key_values
-        logits = target_out.logits[:, -1, :]              # [B, V]
+        logits = target_out.logits[:, -1, :]
 
         generated_ids = input_ids
-        finished = torch.zeros(batch_bs, dtype=torch.bool, device=device)
+        finished = torch.zeros(B, dtype=torch.bool, device=device)
 
-        # ---- 2) Decode one token at a time with dynamic patching ----
+        # 2) Token-by-token decode with dynamic patching
         for _ in range(max_new_tokens):
-            # 2a) choose next token from patched logits
             if do_sample:
                 probs = torch.softmax(logits, dim=-1)
-                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(-1)
+                next_token = torch.multinomial(probs, num_samples=1).squeeze(-1)
             else:
-                next_tokens = torch.argmax(logits, dim=-1)
+                next_token = torch.argmax(logits, dim=-1)
 
             if eos_token_id is not None:
-                eos_fill = torch.full_like(next_tokens, eos_token_id)
-                next_tokens = torch.where(finished, eos_fill, next_tokens)
+                next_token = torch.where(
+                    finished,
+                    torch.full_like(next_token, eos_token_id),
+                    next_token,
+                )
 
-            next_tokens_unsqueezed = next_tokens.unsqueeze(-1)   # [B, 1]
-            generated_ids = torch.cat([generated_ids, next_tokens_unsqueezed], dim=1)
-
-            # extend attention mask
+            generated_ids = torch.cat(
+                [generated_ids, next_token.unsqueeze(-1)], dim=1
+            )
             attention_mask = torch.cat(
-                [attention_mask,
-                 torch.ones_like(next_tokens_unsqueezed, device=device)],
-                dim=1,
+                [attention_mask, torch.ones(B, 1, device=device)], dim=1
             )
 
             if eos_token_id is not None:
-                finished = finished | (next_tokens == eos_token_id)
+                finished = finished | (next_token == eos_token_id)
                 if finished.all():
                     break
 
-            # 2b) donor: one-step forward with cache, refresh patcher.cache
+            # donor model step (refresh cache)
             patcher.reset()
             with torch.no_grad():
                 donor_out = donor_model(
-                    input_ids=next_tokens_unsqueezed,
+                    input_ids=next_token.unsqueeze(-1),
                     attention_mask=attention_mask,
                     use_cache=True,
                     past_key_values=donor_past,
                 )
             donor_past = donor_out.past_key_values
 
-            # 2c) target: one-step forward with cache, patched by donor activations
+            # target model step (patched)
             with torch.no_grad():
                 target_out = target_model(
-                    input_ids=next_tokens_unsqueezed,
+                    input_ids=next_token.unsqueeze(-1),
                     attention_mask=attention_mask,
                     use_cache=True,
                     past_key_values=target_past,
@@ -166,153 +181,253 @@ def generate_completions_dynamic_patch(
             target_past = target_out.past_key_values
             logits = target_out.logits[:, -1, :]
 
-        # ---- 3) Decode only the completion (after each prompt) ----
-        batch_out = []
+        # 3) Decode completions (strip prompt + EOS)
+        batch_outputs = []
         for ids, plen in zip(generated_ids, prompt_lengths):
-            plen = int(plen.item())
-            completion_ids = ids[plen:]
-
+            cids = ids[int(plen.item()):]
             if eos_token_id is not None:
-                eos_positions = (completion_ids == eos_token_id).nonzero(as_tuple=False)
+                eos_positions = (cids == eos_token_id).nonzero(as_tuple=False)
                 if eos_positions.numel() > 0:
-                    completion_ids = completion_ids[:eos_positions[0].item()]
+                    cids = cids[:eos_positions[0].item()]
+            text = tokenizer.decode(cids, skip_special_tokens=True)
+            batch_outputs.append(text)
 
-            text = tokenizer.decode(
-                completion_ids,
-                skip_special_tokens=True,
-                clean_up_tokenization_spaces=True,
-            )
-            batch_out.append(text)
-
-        all_outputs.extend(batch_out)
+        all_outputs.extend(batch_outputs)
 
     return all_outputs
 
 
-# =========
-#   MAIN
-# =========
-
+# ==========================================================
+# === MAIN (single entry point)
+# ==========================================================
 def main():
-    seed_torch(42)
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for this script.")
 
-    # ---- 1. Load change scores / neuron ranks ----
-    change_scores, neuron_ranks, *_ = torch.load(MERGED_CS_PATH, map_location="cpu")
-    total_neurons = neuron_ranks.shape[0]
+    log(f"CUDA visible devices: {torch.cuda.device_count()}")
+    device = torch.device("cuda:0")
+    log(f"Using primary device: {device}")
 
-    # ---- 2. Load dataset & build prompts ----
-    ds = datasets.load_dataset("json", data_files=DATASET_PATH)["train"]
-    if NUM_SAMPLES > 0:
-        ds = ds.select(range(min(NUM_SAMPLES, len(ds))))
-    prompts = [
-        create_prompt_with_tulu_chat_format(
-            [{"role": "user", "content": p.strip()}],
-            add_bos=False,
-        )
-        for p in ds["prompt"]
-    ]
-    print(f"Loaded {len(prompts)} HarmBench prompts.")
+    seed_torch(SEED)
+    log(f"Seeded all RNGs with SEED={SEED}")
 
-    # ---- 3. Load models (target: base, donor: aligned) ----
-    # Target = base (less-safe) model
+    # ---- Load models once, reuse across datasets ----
+    log(f"Loading target (TAR-hardened) model from: {MODEL_PATH}")
     target_model, tok = load_hooked_lm_and_tokenizer(
         model_name_or_path=MODEL_PATH,
         tokenizer_name_or_path=TOKENIZER_PATH,
         device_map="auto",
         torch_dtype="auto",
         load_in_8bit=False,
-        convert_to_half=False,
+        convert_to_half=True,  # explicitly half-precision to save VRAM
     )
     target_model.set_tokenizer(tok)
+    log("Target model loaded.")
 
-    # Donor = aligned (TAR-harden) model
+    log(f"Loading donor (base) model in 8-bit from: {DONOR_MODEL_PATH}")
     donor_model, _ = load_hooked_lm_and_tokenizer(
         model_name_or_path=DONOR_MODEL_PATH,
         tokenizer_name_or_path=TOKENIZER_PATH,
         device_map="auto",
         torch_dtype="auto",
-        load_in_8bit=False,
+        load_in_8bit=True,      # big VRAM saving; safe for donor
         convert_to_half=False,
     )
     donor_model.set_tokenizer(tok)
+    log("Donor model loaded.")
 
-    # ---- 4. Baseline completions from target (base) model ----
-    print("Generating baseline completions (target/base model)...")
-    baseline = generate_completions(
-        target_model,
-        tok,
-        prompts,
-        batch_size=BATCH_SIZE,
-        disable_tqdm=False,
-        max_new_tokens=MAX_NEW_TOKENS,
-        do_sample=False,
-    )
+    # ==================================================
+    # Loop over datasets
+    # ==================================================
+    for cfg in DATASETS:
+        slug = cfg["slug"]        # e.g., 'harmbench' / 'wmdp'
+        pretty = cfg["pretty"]    # e.g., 'HarmBench' / 'WMDP'
 
-    # ---- 5. Sweep fractions of neurons for dynamic patching ----
-    for FRACTION in FRACTIONS:
-        k = int(total_neurons * FRACTION)
-        top_pairs = [tuple(map(int, xy)) for xy in neuron_ranks[:k].tolist()]
-        print(f"\n=== Running fraction {FRACTION:.4f} ({k} neurons) ===")
+        log("=" * 80)
+        log(f"Running dataset: {pretty} (slug='{slug}')")
+        log("=" * 80)
 
-        # Reset hooks so we don't stack perma-hooks across fractions
-        if hasattr(target_model, "reset_hooks"):
-            target_model.reset_hooks(including_permanent=True)
-        if hasattr(donor_model, "reset_hooks"):
-            donor_model.reset_hooks(including_permanent=True)
-
-        # Register dynamic neuron patching (donor -> target)
-        patcher = register_neuron_intervention(
-            method="dynamic_patch",
-            target_model=target_model,
-            neuron_tuples=top_pairs,
-            donor_model=donor_model,
+        # ---- Paths for change-scores and dataset ----
+        # change scores (your completion.pt)
+        merged_cs_path = os.path.join(
+            DATA_ROOT,
+            "hooked_llama",
+            "neuron_activation",
+            slug,
+            BASE_NAME,
+            "completion.pt",
         )
 
-        # Generate patched completions
-        ablated = generate_completions_dynamic_patch(
-            donor_model=donor_model,
-            target_model=target_model,
-            tokenizer=tok,
-            prompts=prompts,
-            patcher=patcher,
+        # filtered dataset
+        dataset_path = os.path.join(
+            DATA_ROOT,
+            "data",
+            "eval",
+            slug,
+            f"{slug}_filtered.jsonl",
+        )
+
+        # output directory for dynamic patching jsonl
+        out_dir_ds = os.path.join(
+            DATA_ROOT,
+            "hooked_llama",
+            "neuron_activation",
+            slug,
+            BASE_NAME,
+        )
+        os.makedirs(out_dir_ds, exist_ok=True)
+
+        log(f"Change-score file: {merged_cs_path}")
+        log(f"Filtered dataset: {dataset_path}")
+        log(f"Output directory: {out_dir_ds}")
+
+        if not os.path.exists(merged_cs_path):
+            raise FileNotFoundError(f"Missing change-score file: {merged_cs_path}")
+        if not os.path.exists(dataset_path):
+            raise FileNotFoundError(f"Missing filtered dataset: {dataset_path}")
+
+        # ---- 1. Load change scores / neuron ranks ----
+        log("Loading change scores & neuron ranks...")
+        change_scores, neuron_ranks, *_ = torch.load(merged_cs_path, map_location="cpu")
+        total_neurons = neuron_ranks.shape[0]
+        log(f"Total neurons ranked: {total_neurons}")
+
+        # ---- 2. Load dataset & build prompts ----
+        log("Loading filtered dataset with datasets.load_dataset...")
+        ds = datasets.load_dataset("json", data_files=dataset_path)["train"]
+        if NUM_SAMPLES > 0:
+            ds = ds.select(range(min(NUM_SAMPLES, len(ds))))
+        log(f"Loaded {len(ds)} prompts from {dataset_path} (NUM_SAMPLES={NUM_SAMPLES})")
+
+        raw_prompts = ds["prompt"]
+        prompts = [
+            create_prompt_with_tulu_chat_format(
+                [{"role": "user", "content": p.strip()}],
+                add_bos=False,
+            )
+            for p in raw_prompts
+        ]
+
+        # ---- 3. Baseline completions from target (no patch) ----
+        log("Generating baseline completions with target (TAR-hardened) model...")
+        baseline = generate_completions(
+            target_model,
+            tok,
+            prompts,
             batch_size=BATCH_SIZE,
-            max_new_tokens=MAX_NEW_TOKENS,
             disable_tqdm=False,
+            max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,
         )
+        log("Baseline generation complete.")
 
-        # ---- 6. Save outputs for this fraction ----
-        out_path = os.path.join(
-            OUT_DIR,
-            f"base_patched_with_TARharden_fraction_{FRACTION:.4f}_on_HarmBench.jsonl",
-        )
-        with open(out_path, "w") as f:
-            for p_raw, out0, out1 in zip(ds["prompt"], baseline, ablated):
-                rec = {
-                    "fraction": FRACTION,
-                    "prompt": p_raw,
-                    "baseline_completion": out0,
-                    "patched_completion": out1,
-                    "method": "dynamic_patch",
-                }
-                f.write(json.dumps(rec) + "\n")
-        print(f"Saved outputs -> {out_path}")
+        total_examples = len(prompts)
 
-        # ---- 7. Print a few example diffs ----
-        print("\nExample diffs for fraction", FRACTION)
-        for i in range(min(2, len(prompts))):
-            print("=" * 80)
-            print("PROMPT:", ds["prompt"][i])
-            print("--- BASELINE (target/base) ---")
-            print(baseline[i])
-            print("--- PATCHED (with aligned donor) ---")
-            print(ablated[i])
+        # ---- 4. Sweep fractions of neurons for dynamic patching ----
+        for FRACTION in FRACTIONS:
+            # Resume logic: check if output file already has some lines
+            out_path = os.path.join(
+                out_dir_ds,
+                f"Dynamic_patching_{FRACTION:.4f}.jsonl",
+            )
+
+            done_n = 0
+            if os.path.exists(out_path):
+                with open(out_path, "r") as f:
+                    done_n = sum(1 for line in f if line.strip())
+
+                if done_n >= total_examples:
+                    log(
+                        f"[{slug}] FRACTION={FRACTION:.4f}: "
+                        f"already complete ({done_n}/{total_examples}), skipping."
+                    )
+                    continue
+                else:
+                    log(
+                        f"[{slug}] FRACTION={FRACTION:.4f}: "
+                        f"resuming from example {done_n}/{total_examples}."
+                    )
+            else:
+                log(
+                    f"[{slug}] FRACTION={FRACTION:.4f}: "
+                    f"starting fresh for {total_examples} examples."
+                )
+
+            # Determine how many neurons to patch
+            k = int(total_neurons * FRACTION)
+            top_pairs = [tuple(map(int, xy)) for xy in neuron_ranks[:k].tolist()]
+            log(
+                f"[{slug}] FRACTION={FRACTION:.4f}: "
+                f"patching top {k} neurons out of {total_neurons}."
+            )
+
+            # Reset hooks to avoid stacking
+            if hasattr(target_model, "reset_hooks"):
+                target_model.reset_hooks(including_permanent=True)
+            if hasattr(donor_model, "reset_hooks"):
+                donor_model.reset_hooks(including_permanent=True)
+
+            # Register dynamic neuron patching (donor -> target)
+            patcher = register_neuron_intervention(
+                method="dynamic_patch",
+                target_model=target_model,
+                neuron_tuples=top_pairs,
+                donor_model=donor_model,
+            )
+
+            # Compute remaining slice
+            remaining_count = total_examples - done_n
+            prompts_tail = prompts[done_n:]
+            raw_prompts_tail = raw_prompts[done_n:]
+            baseline_tail = baseline[done_n:]
+
+            log(
+                f"[{slug}] FRACTION={FRACTION:.4f}: "
+                f"generating patched completions for {remaining_count} remaining examples..."
+            )
+
+            ablated_tail = generate_completions_dynamic_patch(
+                donor_model=donor_model,
+                target_model=target_model,
+                tokenizer=tok,
+                prompts=prompts_tail,
+                patcher=patcher,
+                batch_size=BATCH_SIZE,
+                max_new_tokens=MAX_NEW_TOKENS,
+                disable_tqdm=False,
+                do_sample=False,
+            )
+
+            # ---- 5. Save outputs (append if resuming) ----
+            mode = "a" if os.path.exists(out_path) and done_n > 0 else "w"
+            written = 0
+            with open(out_path, mode) as f:
+                for p_raw, out0, out1 in zip(
+                    raw_prompts_tail, baseline_tail, ablated_tail
+                ):
+                    rec = {
+                        "dataset": slug,
+                        "fraction": FRACTION,
+                        "prompt": p_raw,
+                        "baseline_completion": out0,
+                        "patched_completion": out1,
+                        "method": "dynamic_patch",
+                    }
+                    f.write(json.dumps(rec) + "\n")
+                    written += 1
+
+            log(
+                f"[{slug}] FRACTION={FRACTION:.4f}: "
+                f"wrote {written} records to {out_path} "
+                f"(total now ≈ {done_n + written}/{total_examples})."
+            )
 
     # Final cleanup
     if hasattr(target_model, "reset_hooks"):
         target_model.reset_hooks(including_permanent=True)
     if hasattr(donor_model, "reset_hooks"):
         donor_model.reset_hooks(including_permanent=True)
+    log("All datasets completed. Hooks reset and script finished.")
 
 
 if __name__ == "__main__":

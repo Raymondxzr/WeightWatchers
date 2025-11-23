@@ -216,78 +216,156 @@ def generate_completions_and_scores(model, tokenizer, prompts, reward_model=None
     return generations, cost_scores, reward_scores, masks
 
 @torch.no_grad()
-def generate_completions_and_masks(model, tokenizer, prompts, batch_size=1, add_special_tokens=True, disable_tqdm=False, **generation_kwargs):
+def generate_completions_and_masks(
+    model,
+    tokenizer,
+    prompts,
+    batch_size=1,
+    add_special_tokens=True,
+    disable_tqdm=False,
+    **generation_kwargs,
+):
+    """
+    Fully safe drop-in replacement.
+    Preserves:
+        - outputs   (tensor list)
+        - attention_masks
+        - gather_masks  (1 for completion tokens)
+    Never inserts strings into tensors.
+    """
+    import torch
+    import tqdm
+
     outputs = []
     attention_masks = []
     gather_masks = []
+
+    num_return_sequences = generation_kwargs.get("num_return_sequences", 1)
+
     if not disable_tqdm:
         progress = tqdm.tqdm(total=len(prompts), desc="Generating Completions")
 
-    num_return_sequences = generation_kwargs.get("num_return_sequences", 1)
     for i in range(0, len(prompts), batch_size):
-        batch_prompts = prompts[i:i+batch_size]
-        tokenized_prompts = tokenizer(batch_prompts, padding="longest", return_tensors="pt", add_special_tokens=add_special_tokens)
-        batch_input_ids = tokenized_prompts.input_ids
-        attention_mask = tokenized_prompts.attention_mask
+        batch_prompts = prompts[i:i + batch_size]
+
+        tokenized = tokenizer(
+            batch_prompts,
+            padding="longest",
+            return_tensors="pt",
+            add_special_tokens=add_special_tokens,
+        )
+
+        batch_input_ids = tokenized.input_ids
+        batch_attention_mask = tokenized.attention_mask
 
         if model.device.type == "cuda":
             batch_input_ids = batch_input_ids.to(model.device)
-            attention_mask = attention_mask.to(model.device)
+            batch_attention_mask = batch_attention_mask.to(model.device)
 
         try:
+            # =========================
+            # NORMAL GENERATION
+            # =========================
             batch_outputs_ids = model.generate(
                 input_ids=batch_input_ids,
-                attention_mask=attention_mask,
-                **generation_kwargs
+                attention_mask=batch_attention_mask,
+                **generation_kwargs,
             )
 
-            # remove the prompt from the output
-            # we need to re-encode the prompt because we need to make sure the special tokens are treated the same way as in the outputs.
-            # we changed our previous way of truncating the output token ids dicrectly because some tokenizer (e.g., llama) won't add space token before the first token.
-            # space is important for some tasks (e.g., code completion).
-            batch_outputs = tokenizer.batch_decode(batch_outputs_ids, skip_special_tokens=True)
-            batch_prompts = tokenizer.batch_decode(batch_input_ids, skip_special_tokens=True)
-            # duplicate the prompts to match the number of return sequences
-            batch_prompts = [prompt for prompt in batch_prompts for _ in range(num_return_sequences)]
-            batch_generations = [
-                output[len(prompt):] for prompt, output in zip(batch_prompts, batch_outputs)
+            # Decode fully
+            decoded_outputs = tokenizer.batch_decode(
+                batch_outputs_ids,
+                skip_special_tokens=True,
+            )
+            decoded_prompts = tokenizer.batch_decode(
+                batch_input_ids,
+                skip_special_tokens=True,
+            )
+
+            # Duplicate prompts for num_return_sequences
+            decoded_prompts = [
+                p for p in decoded_prompts for _ in range(num_return_sequences)
             ]
-            # breakpoint()
+
+            # Slice completions off decoded string
+            decoded_generations = [
+                out[len(prompt):] for prompt, out in zip(decoded_prompts, decoded_outputs)
+            ]
+
+            # Re-tokenize split (prompt + generation)
             batch_ids = []
-            batch_attention_mask = []
-            batch_gather_mask = []
-            max_length = -1
-            for prompt, output in zip(batch_prompts, batch_generations):
-                prompt_ids = tokenizer(prompt, add_special_tokens=add_special_tokens).input_ids
-                output_ids = tokenizer(output, add_special_tokens=False).input_ids
-                ids = prompt_ids + output_ids
-                max_length = max(len(ids), max_length)
+            batch_attn = []
+            batch_gather = []
+            max_len = 0
+
+            for prompt_text, gen_text in zip(decoded_prompts, decoded_generations):
+                prompt_ids = tokenizer(
+                    prompt_text,
+                    add_special_tokens=add_special_tokens,
+                ).input_ids
+
+                gen_ids = tokenizer(
+                    gen_text,
+                    add_special_tokens=False,
+                ).input_ids
+
+                ids = prompt_ids + gen_ids
+                max_len = max(max_len, len(ids))
                 batch_ids.append(ids)
-                batch_attention_mask.append([1]*len(ids))
-                batch_gather_mask.append([1]*len(output_ids))
-                
-            batch_ids = [[tokenizer.pad_token_id]*(max_length-len(ids)) + ids for ids in batch_ids]
-            batch_attention_mask = [[0]*(max_length-len(mask)) + mask for mask in batch_attention_mask]
-            batch_gather_mask = [[0]*(max_length-len(mask)) + mask for mask in batch_gather_mask]
-            
+                batch_attn.append([1] * len(ids))
+                batch_gather.append([0] * len(prompt_ids) + [1] * len(gen_ids))
+
         except Exception as e:
+            # =========================
+            # SAFE FALLBACK
+            # =========================
             print("Error when generating completions for batch:")
             print(batch_prompts)
             print("Error message:")
             print(e)
-            print("Use empty string as the completion.")
-            batch_ids = batch_prompts * num_return_sequences
+            print("Falling back to prompt-only tokens.")
 
-        outputs.append(torch.tensor(batch_ids))
-        attention_masks.append(torch.tensor(batch_attention_mask))
-        gather_masks.append(torch.tensor(batch_gather_mask))
+            batch_ids = []
+            batch_attn = []
+            batch_gather = []
+            max_len = 0
+
+            # fallback: no generation → only prompt tokens
+            for prompt in batch_prompts:
+                prompt_ids = tokenizer(
+                    prompt,
+                    add_special_tokens=add_special_tokens,
+                ).input_ids
+
+                max_len = max(max_len, len(prompt_ids))
+                batch_ids.append(prompt_ids)
+                batch_attn.append([1] * len(prompt_ids))
+                batch_gather.append([0] * len(prompt_ids))  # no completion tokens
+
+        # =========================
+        # PAD ALL TO max_len (left-padding!)
+        # =========================
+        pad_id = tokenizer.pad_token_id
+
+        padded_ids = []
+        padded_attn = []
+        padded_gather = []
+
+        for ids, att, gat in zip(batch_ids, batch_attn, batch_gather):
+            pad_len = max_len - len(ids)
+            padded_ids.append([pad_id] * pad_len + ids)
+            padded_attn.append([0] * pad_len + att)
+            padded_gather.append([0] * pad_len + gat)
+
+        outputs.append(torch.tensor(padded_ids))
+        attention_masks.append(torch.tensor(padded_attn))
+        gather_masks.append(torch.tensor(padded_gather))
 
         if not disable_tqdm:
-            progress.update(len(batch_prompts)//num_return_sequences)
+            progress.update(len(batch_prompts) // num_return_sequences)
 
-    # tokenized_generations = tokenizer(generations, padding="longest", return_tensors="pt", add_special_tokens=False)
-    # assert len(outputs) == len(prompts) * num_return_sequences, "number of generations should be equal to number of prompts * num_return_sequences"
     return outputs, attention_masks, gather_masks
+
 
 @torch.no_grad()
 def get_next_word_predictions(model, tokenizer, prompts, candidate_token_ids=None, batch_size=1, return_token_predictions=False, add_special_tokens=True, disable_tqdm=False):
