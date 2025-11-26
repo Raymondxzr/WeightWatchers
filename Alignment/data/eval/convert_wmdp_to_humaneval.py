@@ -24,7 +24,7 @@ from datasets import load_dataset
 # ============================================================
 
 # Use short names here:
-DOMAIN = "cyber"   # "cyber", "bio", or "chem"
+DOMAIN = "bio"   # "cyber", "bio", or "chem"
 SPLIT = "test"
 
 # Map to actual HF builder configs

@@ -1,0 +1,117 @@
+/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+[2025-11-26T04:02:49] CUDA visible devices: 2
+[2025-11-26T04:02:49] Using primary device: cuda:0
+[2025-11-26T04:02:49] Seeded all RNGs with SEED=42
+[2025-11-26T04:02:49] Loading target (TAR-hardened) model from: models/Meta-Llama-3-8B-Instruct-TARharden
+Loading checkpoint shards:   0%|          | 0/7 [00:00<?, ?it/s]Loading checkpoint shards:  14%|█▍        | 1/7 [00:01<00:08,  1.40s/it]Loading checkpoint shards:  29%|██▊       | 2/7 [00:02<00:07,  1.41s/it]Loading checkpoint shards:  43%|████▎     | 3/7 [00:04<00:05,  1.37s/it]Loading checkpoint shards:  57%|█████▋    | 4/7 [00:05<00:04,  1.39s/it]Loading checkpoint shards:  57%|█████▋    | 4/7 [00:06<00:04,  1.56s/it]
+Traceback (most recent call last):
+  File "/data/raymondxia/SafetyNeuron/analyze_ablation.py", line 322, in <module>
+    main()
+  File "/data/raymondxia/SafetyNeuron/analyze_ablation.py", line 119, in main
+    target_model, tok = load_hooked_lm_and_tokenizer(
+  File "/data/raymondxia/SafetyNeuron/src/eval/utils.py", line 547, in load_hooked_lm_and_tokenizer
+    hook_model = model_cls.from_pretrained(
+  File "/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/transformers/modeling_utils.py", line 3754, in from_pretrained
+    ) = cls._load_pretrained_model(
+  File "/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/transformers/modeling_utils.py", line 4214, in _load_pretrained_model
+    new_error_msgs, offload_index, state_dict_index = _load_state_dict_into_meta_model(
+  File "/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/transformers/modeling_utils.py", line 887, in _load_state_dict_into_meta_model
+    set_module_tensor_to_device(model, param_name, param_device, **set_module_kwargs)
+  File "/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/accelerate/utils/modeling.py", line 400, in set_module_tensor_to_device
+    new_value = value.to(device)
+KeyboardInterrupt
+/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/pydantic/_internal/_generate_schema.py:2249: UnsupportedFieldAttributeWarning: The 'frozen' attribute with value True was provided to the `Field()` function, which has no effect in the context it was used. 'frozen' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+  warnings.warn(
+[2025-11-26T04:03:31] CUDA visible devices: 2
+[2025-11-26T04:03:31] Using primary device: cuda:0
+[2025-11-26T04:03:31] Seeded all RNGs with SEED=42
+[2025-11-26T04:03:31] Loading target (TAR-hardened) model from: models/Meta-Llama-3-8B-Instruct-TARharden
+Loading checkpoint shards:   0%|          | 0/7 [00:00<?, ?it/s]Loading checkpoint shards:  14%|█▍        | 1/7 [00:01<00:08,  1.43s/it]Loading checkpoint shards:  29%|██▊       | 2/7 [00:02<00:06,  1.30s/it]Loading checkpoint shards:  43%|████▎     | 3/7 [00:03<00:04,  1.25s/it]Loading checkpoint shards:  57%|█████▋    | 4/7 [00:04<00:03,  1.22s/it]Loading checkpoint shards:  71%|███████▏  | 5/7 [00:06<00:02,  1.19s/it]Loading checkpoint shards:  86%|████████▌ | 6/7 [00:07<00:01,  1.16s/it]Loading checkpoint shards: 100%|██████████| 7/7 [00:07<00:00,  1.02it/s]Loading checkpoint shards: 100%|██████████| 7/7 [00:07<00:00,  1.12s/it]
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+Load HookedLlamaForCausalLM successfully!
+[2025-11-26T04:03:43] Target model loaded.
+[2025-11-26T04:03:43] Loading donor (base) model in 8-bit from: models/Meta-Llama-3-8B-Instruct
+The `load_in_4bit` and `load_in_8bit` arguments are deprecated and will be removed in the future versions. Please, pass a `BitsAndBytesConfig` object in `quantization_config` argument instead.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:04<00:12,  4.12s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:09<00:09,  4.81s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:14<00:04,  4.91s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:15<00:00,  3.45s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:15<00:00,  3.91s/it]
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+Load HookedLlamaForCausalLM successfully!
+[2025-11-26T04:04:07] Donor model loaded (8-bit).
+[2025-11-26T04:04:07] ================================================================================
+[2025-11-26T04:04:07] Running dataset: WMDP_CYBER (slug='wmdp_cyber')
+[2025-11-26T04:04:07] ================================================================================
+[2025-11-26T04:04:07] Output directory: Alignment/hooked_llama/neuron_activation/wmdp_cyber/Meta-Llama-3-8B-Instruct
+[2025-11-26T04:04:07] Loading change scores & neuron ranks...
+[2025-11-26T04:04:07] Total neurons ranked: 458752
+[2025-11-26T04:04:07] Loading filtered dataset with datasets.load_dataset...
+[2025-11-26T04:04:07] Loaded 8 prompts from Alignment/data/eval/wmdp_cyber/wmdp_cyber_filtered.jsonl (NUM_SAMPLES=8)
+[2025-11-26T04:04:07] Generating baseline completions with target (TAR-hardened) model...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/transformers/generation/configuration_utils.py:515: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/data/raymondxia/miniforge3/envs/safetyneuron/lib/python3.10/site-packages/transformers/generation/configuration_utils.py:520: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.9` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:07<00:07,  1.91s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [00:14<00:00,  1.80s/it]Generating Completions: 100%|██████████| 8/8 [00:14<00:00,  1.82s/it]
+[2025-11-26T04:04:22] Baseline generation complete.
+[2025-11-26T04:04:22] [wmdp_cyber] FRACTION=0.0000: starting fresh for 8 examples.
+[2025-11-26T04:04:22] [wmdp_cyber] FRACTION=0.0000: patching top 0 neurons out of 458752.
+[2025-11-26T04:04:22] [wmdp_cyber] FRACTION=0.0000: generating patched completions for 8 remaining examples...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:07<00:07,  1.93s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [00:15<00:00,  1.94s/it]Generating Completions: 100%|██████████| 8/8 [00:15<00:00,  1.94s/it]
+[2025-11-26T04:04:37] [wmdp_cyber] FRACTION=0.0000: wrote 8 records to Alignment/hooked_llama/neuron_activation/wmdp_cyber/Meta-Llama-3-8B-Instruct/Dynamic_patching_0.0000.jsonl (total now ≈ 8/8).
+[2025-11-26T04:04:37] [wmdp_cyber] FRACTION=0.0010: starting fresh for 8 examples.
+[2025-11-26T04:04:37] [wmdp_cyber] FRACTION=0.0010: patching top 458 neurons out of 458752.
+[2025-11-26T04:04:37] [wmdp_cyber] FRACTION=0.0010: generating patched completions for 8 remaining examples...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:31<00:31,  7.90s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [01:02<00:00,  7.85s/it]Generating Completions: 100%|██████████| 8/8 [01:02<00:00,  7.86s/it]
+[2025-11-26T04:05:40] [wmdp_cyber] FRACTION=0.0010: wrote 8 records to Alignment/hooked_llama/neuron_activation/wmdp_cyber/Meta-Llama-3-8B-Instruct/Dynamic_patching_0.0010.jsonl (total now ≈ 8/8).
+[2025-11-26T04:05:40] [wmdp_cyber] FRACTION=0.0050: starting fresh for 8 examples.
+[2025-11-26T04:05:40] [wmdp_cyber] FRACTION=0.0050: patching top 2293 neurons out of 458752.
+[2025-11-26T04:05:40] [wmdp_cyber] FRACTION=0.0050: generating patched completions for 8 remaining examples...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:35<00:35,  8.80s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [01:10<00:00,  8.87s/it]Generating Completions: 100%|██████████| 8/8 [01:10<00:00,  8.86s/it]
+[2025-11-26T04:06:51] [wmdp_cyber] FRACTION=0.0050: wrote 8 records to Alignment/hooked_llama/neuron_activation/wmdp_cyber/Meta-Llama-3-8B-Instruct/Dynamic_patching_0.0050.jsonl (total now ≈ 8/8).
+[2025-11-26T04:06:51] ================================================================================
+[2025-11-26T04:06:51] Running dataset: WMDP_BIO (slug='wmdp_bio')
+[2025-11-26T04:06:51] ================================================================================
+[2025-11-26T04:06:51] Output directory: Alignment/hooked_llama/neuron_activation/wmdp_bio/Meta-Llama-3-8B-Instruct
+[2025-11-26T04:06:51] Loading change scores & neuron ranks...
+[2025-11-26T04:06:51] Total neurons ranked: 458752
+[2025-11-26T04:06:51] Loading filtered dataset with datasets.load_dataset...
+[2025-11-26T04:06:51] Loaded 8 prompts from Alignment/data/eval/wmdp_bio/wmdp_bio_filtered.jsonl (NUM_SAMPLES=8)
+[2025-11-26T04:06:51] Generating baseline completions with target (TAR-hardened) model...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:06<00:06,  1.72s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [00:13<00:00,  1.72s/it]Generating Completions: 100%|██████████| 8/8 [00:13<00:00,  1.72s/it]
+[2025-11-26T04:07:05] Baseline generation complete.
+[2025-11-26T04:07:05] [wmdp_bio] FRACTION=0.0000: starting fresh for 8 examples.
+[2025-11-26T04:07:05] [wmdp_bio] FRACTION=0.0000: patching top 0 neurons out of 458752.
+[2025-11-26T04:07:05] [wmdp_bio] FRACTION=0.0000: generating patched completions for 8 remaining examples...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:07<00:07,  1.97s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [00:15<00:00,  1.98s/it]Generating Completions: 100%|██████████| 8/8 [00:15<00:00,  1.98s/it]
+[2025-11-26T04:07:21] [wmdp_bio] FRACTION=0.0000: wrote 8 records to Alignment/hooked_llama/neuron_activation/wmdp_bio/Meta-Llama-3-8B-Instruct/Dynamic_patching_0.0000.jsonl (total now ≈ 8/8).
+[2025-11-26T04:07:21] [wmdp_bio] FRACTION=0.0010: starting fresh for 8 examples.
+[2025-11-26T04:07:21] [wmdp_bio] FRACTION=0.0010: patching top 458 neurons out of 458752.
+[2025-11-26T04:07:21] [wmdp_bio] FRACTION=0.0010: generating patched completions for 8 remaining examples...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:31<00:31,  7.89s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [01:04<00:00,  8.08s/it]Generating Completions: 100%|██████████| 8/8 [01:04<00:00,  8.06s/it]
+[2025-11-26T04:08:25] [wmdp_bio] FRACTION=0.0010: wrote 8 records to Alignment/hooked_llama/neuron_activation/wmdp_bio/Meta-Llama-3-8B-Instruct/Dynamic_patching_0.0010.jsonl (total now ≈ 8/8).
+[2025-11-26T04:08:25] [wmdp_bio] FRACTION=0.0050: starting fresh for 8 examples.
+[2025-11-26T04:08:25] [wmdp_bio] FRACTION=0.0050: patching top 2293 neurons out of 458752.
+[2025-11-26T04:08:25] [wmdp_bio] FRACTION=0.0050: generating patched completions for 8 remaining examples...
+Generating Completions:   0%|          | 0/8 [00:00<?, ?it/s]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions:  50%|█████     | 4/8 [00:37<00:37,  9.43s/it]Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+Generating Completions: 100%|██████████| 8/8 [01:14<00:00,  9.29s/it]Generating Completions: 100%|██████████| 8/8 [01:14<00:00,  9.31s/it]
+[2025-11-26T04:09:40] [wmdp_bio] FRACTION=0.0050: wrote 8 records to Alignment/hooked_llama/neuron_activation/wmdp_bio/Meta-Llama-3-8B-Instruct/Dynamic_patching_0.0050.jsonl (total now ≈ 8/8).
+[2025-11-26T04:09:40] All datasets completed. Hooks reset and script finished.
+[W1126 04:09:41.766758595 AllocatorConfig.cpp:28] Warning: PYTORCH_CUDA_ALLOC_CONF is deprecated, use PYTORCH_ALLOC_CONF instead (function operator())

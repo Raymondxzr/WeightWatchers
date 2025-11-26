@@ -8,7 +8,7 @@ from tqdm import tqdm
 import torch
 import datasets
 
-from eval.utils import load_hooked_lm_and_tokenizer
+from src.eval.utils import load_hooked_lm_and_tokenizer
 from src.utils import get_act_name
 from src.utils import seed_torch
 

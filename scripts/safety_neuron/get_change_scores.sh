@@ -10,13 +10,15 @@ BASE_MODEL=(Meta-Llama-3-8B-Instruct)
 
 # ---- Raw datasets (your inputs) ----
 RAW_DATASET=(
-    data/eval/harmbench/HarmBench_standard.jsonl
-    data/eval/wmdp/wmdp_cyber.jsonl
+    # data/eval/harmbench/HarmBench_standard.jsonl
+    # data/eval/wmdp/wmdp_cyber.jsonl
+    data/eval/wmdp/wmdp_bio.jsonl
 )
 
 DATASET_NAME=(
-    harmbench
-    wmdp
+    # harmbench
+    # wmdp_cyber
+    wmdp_bio
 )
 
 BATCH_SIZE=4
